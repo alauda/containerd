@@ -41,6 +41,7 @@ import (
 	"github.com/containerd/imgcrypt/images/encryption"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/net/context"
+	"golang.org/x/net/http/httpproxy"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
@@ -365,13 +366,13 @@ func (c *criService) registryHosts(ctx context.Context, auth *runtime.AuthConfig
 			}
 
 			var (
-				transport = newTransport()
-				client    = &http.Client{Transport: transport}
-				config    = c.config.Registry.Configs[u.Host]
+				transport      = newTransport()
+				client         = &http.Client{Transport: transport}
+				registryConfig = c.config.Registry.Configs[u.Host]
 			)
 
-			if config.TLS != nil {
-				transport.TLSClientConfig, err = c.getTLSConfig(*config.TLS)
+			if registryConfig.TLS != nil {
+				transport.TLSClientConfig, err = c.getTLSConfig(*registryConfig.TLS)
 				if err != nil {
 					return nil, fmt.Errorf("get TLSConfig for registry %q: %w", e, err)
 				}
@@ -385,8 +386,8 @@ func (c *criService) registryHosts(ctx context.Context, auth *runtime.AuthConfig
 			// Make a copy of `auth`, so that different authorizers would not reference
 			// the same auth variable.
 			auth := auth
-			if auth == nil && config.Auth != nil {
-				auth = toRuntimeAuthConfig(*config.Auth)
+			if auth == nil && registryConfig.Auth != nil {
+				auth = toRuntimeAuthConfig(*registryConfig.Auth)
 			}
 			authorizer := docker.NewDockerAuthorizer(
 				docker.WithAuthClient(client),
@@ -397,7 +398,11 @@ func (c *criService) registryHosts(ctx context.Context, auth *runtime.AuthConfig
 			if u.Path == "" {
 				u.Path = "/v2"
 			}
-
+			if proxyConfig := httpproxy.FromEnvironment(); proxyConfig.HTTPProxy != "" || proxyConfig.HTTPSProxy != "" {
+				noProxyTr := transport.Clone()
+				noProxyTr.Proxy = nil
+				client.Transport = config.NewMixTransport(transport, noProxyTr)
+			}
 			registries = append(registries, docker.RegistryHost{
 				Client:       client,
 				Authorizer:   authorizer,
