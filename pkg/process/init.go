@@ -313,6 +313,10 @@ func (p *Init) delete(ctx context.Context) error {
 			err = fmt.Errorf("failed rootfs umount: %w", err2)
 		}
 	}
+	if err == nil {
+		// mount.UnmountAll may take long time to process and the context may be timeout.
+		err = ctx.Err()
+	}
 	return err
 }
 
