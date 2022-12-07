@@ -371,6 +371,12 @@ func (c *criService) registryHosts(ctx context.Context, auth *runtime.AuthConfig
 				registryConfig = c.config.Registry.Configs[u.Host]
 			)
 
+			if proxyConfig := httpproxy.FromEnvironment(); proxyConfig.HTTPProxy != "" || proxyConfig.HTTPSProxy != "" {
+				noProxyTr := transport.Clone()
+				noProxyTr.Proxy = nil
+				client.Transport = config.NewMixTransport(transport, noProxyTr)
+			}
+
 			if registryConfig.TLS != nil {
 				transport.TLSClientConfig, err = c.getTLSConfig(*registryConfig.TLS)
 				if err != nil {
@@ -398,11 +404,7 @@ func (c *criService) registryHosts(ctx context.Context, auth *runtime.AuthConfig
 			if u.Path == "" {
 				u.Path = "/v2"
 			}
-			if proxyConfig := httpproxy.FromEnvironment(); proxyConfig.HTTPProxy != "" || proxyConfig.HTTPSProxy != "" {
-				noProxyTr := transport.Clone()
-				noProxyTr.Proxy = nil
-				client.Transport = config.NewMixTransport(transport, noProxyTr)
-			}
+
 			registries = append(registries, docker.RegistryHost{
 				Client:       client,
 				Authorizer:   authorizer,
