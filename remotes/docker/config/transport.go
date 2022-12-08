@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"golang.org/x/net/http/httpproxy"
 	"io"
 	"net/http"
 	"os"
@@ -10,16 +11,25 @@ import (
 
 var pushReg = regexp.MustCompile(`/v2/.*/blobs/uploads/.*`)
 
-func NewMixTransport(proxy http.RoundTripper, noProxy http.RoundTripper) http.RoundTripper {
+func NewMixTransport(t *http.Transport) http.RoundTripper {
+	noPorxy := t.Clone()
+	noPorxy.Proxy = nil
 	return &MixTransport{
-		proxy,
-		noProxy,
+		t,
+		noPorxy,
 	}
 }
 
 type MixTransport struct {
 	proxyTransport   http.RoundTripper
 	noProxyTransport http.RoundTripper
+}
+
+func HasProxy() bool {
+	if proxyConfig := httpproxy.FromEnvironment(); proxyConfig.HTTPProxy != "" || proxyConfig.HTTPSProxy != "" {
+		return true
+	}
+	return false
 }
 
 func (t *MixTransport) RoundTrip(req *http.Request) (*http.Response, error) {

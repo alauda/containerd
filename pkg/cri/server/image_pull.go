@@ -41,7 +41,6 @@ import (
 	"github.com/containerd/imgcrypt/images/encryption"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/net/context"
-	"golang.org/x/net/http/httpproxy"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
@@ -371,10 +370,8 @@ func (c *criService) registryHosts(ctx context.Context, auth *runtime.AuthConfig
 				registryConfig = c.config.Registry.Configs[u.Host]
 			)
 
-			if proxyConfig := httpproxy.FromEnvironment(); proxyConfig.HTTPProxy != "" || proxyConfig.HTTPSProxy != "" {
-				noProxyTr := transport.Clone()
-				noProxyTr.Proxy = nil
-				client.Transport = config.NewMixTransport(transport, noProxyTr)
+			if config.HasProxy() {
+				client.Transport = config.NewMixTransport(transport)
 			}
 
 			if registryConfig.TLS != nil {
