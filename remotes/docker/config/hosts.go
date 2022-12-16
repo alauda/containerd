@@ -22,7 +22,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"golang.org/x/net/http/httpproxy"
 	"net"
 	"net/http"
 	"net/url"
@@ -136,12 +135,8 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 		client := &http.Client{
 			Transport: defaultTransport,
 		}
-		var hasProxy bool
-		if proxyConfig := httpproxy.FromEnvironment(); proxyConfig.HTTPProxy != "" || proxyConfig.HTTPSProxy != "" {
-			hasProxy = true
-			noProxyTr := defaultTransport.Clone()
-			noProxyTr.Proxy = nil
-			client.Transport = NewMixTransport(defaultTransport, noProxyTr)
+		if HasProxy() {
+			client.Transport = NewMixTransport(defaultTransport)
 		}
 		if options.UpdateClient != nil {
 			if err := options.UpdateClient(client); err != nil {
@@ -220,10 +215,8 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 
 				c := *client
 				c.Transport = tr
-				if hasProxy {
-					noProxyTr := tr.Clone()
-					noProxyTr.Proxy = nil
-					c.Transport = NewMixTransport(tr, noProxyTr)
+				if HasProxy() {
+					c.Transport = NewMixTransport(tr)
 				}
 				if options.UpdateClient != nil {
 					if err := options.UpdateClient(&c); err != nil {
