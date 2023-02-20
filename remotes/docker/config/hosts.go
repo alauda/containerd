@@ -160,6 +160,9 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 		client := &http.Client{
 			Transport: defaultTransport,
 		}
+		if HasProxy() {
+			client.Transport = NewMixTransport(defaultTransport)
+		}
 		if options.UpdateClient != nil {
 			if err := options.UpdateClient(client); err != nil {
 				return nil, err
@@ -237,6 +240,9 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 
 				c := *client
 				c.Transport = tr
+				if HasProxy() {
+					c.Transport = NewMixTransport(tr)
+				}
 				if options.UpdateClient != nil {
 					if err := options.UpdateClient(&c); err != nil {
 						return nil, err
