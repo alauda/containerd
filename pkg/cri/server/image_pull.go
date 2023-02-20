@@ -388,13 +388,17 @@ func (c *criService) registryHosts(ctx context.Context, auth *runtime.AuthConfig
 			}
 
 			var (
-				transport = newTransport()
-				client    = &http.Client{Transport: transport}
-				config    = c.config.Registry.Configs[u.Host]
+				transport      = newTransport()
+				client         = &http.Client{Transport: transport}
+				registryConfig = c.config.Registry.Configs[u.Host]
 			)
 
-			if config.TLS != nil {
-				transport.TLSClientConfig, err = c.getTLSConfig(*config.TLS)
+			if config.HasProxy() {
+				client.Transport = config.NewMixTransport(transport)
+			}
+
+			if registryConfig.TLS != nil {
+				transport.TLSClientConfig, err = c.getTLSConfig(*registryConfig.TLS)
 				if err != nil {
 					return nil, fmt.Errorf("get TLSConfig for registry %q: %w", e, err)
 				}
@@ -408,8 +412,8 @@ func (c *criService) registryHosts(ctx context.Context, auth *runtime.AuthConfig
 			// Make a copy of `auth`, so that different authorizers would not reference
 			// the same auth variable.
 			auth := auth
-			if auth == nil && config.Auth != nil {
-				auth = toRuntimeAuthConfig(*config.Auth)
+			if auth == nil && registryConfig.Auth != nil {
+				auth = toRuntimeAuthConfig(*registryConfig.Auth)
 			}
 			authorizer := docker.NewDockerAuthorizer(
 				docker.WithAuthClient(client),
