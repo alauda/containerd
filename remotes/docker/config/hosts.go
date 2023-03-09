@@ -95,10 +95,13 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 		if hosts == nil {
 			hosts = make([]hostConfig, 1)
 		}
+		if tagetHost == "docker.io" {
+			tagetHost = "registry-1.docker.io"
+		}
 		if len(hosts) > 0 && hosts[len(hosts)-1].host == "" {
-			if tagetHost == "docker.io" {
+			if tagetHost == "registry-1.docker.io" {
 				hosts[len(hosts)-1].scheme = "https"
-				hosts[len(hosts)-1].host = "registry-1.docker.io"
+				hosts[len(hosts)-1].host = tagetHost
 			} else if docker.IsLocalhost(tagetHost) {
 				hosts[len(hosts)-1].host = tagetHost
 				if options.DefaultScheme == "" {
