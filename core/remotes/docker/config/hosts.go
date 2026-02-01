@@ -157,6 +157,10 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 			}
 		}
 
+		if HasProxy() {
+			client.Transport = NewMixTransport(defaultTransport)
+		}
+
 		authOpts := []docker.AuthorizerOpt{docker.WithAuthClient(client)}
 		if options.Credentials != nil {
 			authOpts = append(authOpts, docker.WithAuthCreds(options.Credentials))
@@ -197,6 +201,10 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 					}
 
 					c.Transport = tr
+
+					if HasProxy() {
+						c.Transport = NewMixTransport(tr)
+					}
 				}
 
 				if options.UpdateClient != nil {
