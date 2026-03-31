@@ -1,6 +1,6 @@
 module github.com/containerd/containerd/api
 
-go 1.23.0
+go 1.25.8
 
 require (
 	github.com/containerd/ttrpc v1.2.5
