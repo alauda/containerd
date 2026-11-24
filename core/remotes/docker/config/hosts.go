@@ -76,10 +76,10 @@ type HostOptions struct {
 // certificate files laid out in the Docker specific layout.
 // If a `HostDir` function is not required, defaults are used.
 func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHosts {
-	return func(host string) ([]docker.RegistryHost, error) {
+	return func(tagetHost string) ([]docker.RegistryHost, error) {
 		var hosts []hostConfig
 		if options.HostDir != nil {
-			dir, err := options.HostDir(host)
+			dir, err := options.HostDir(tagetHost)
 			if err != nil && !errdefs.IsNotFound(err) {
 				return nil, err
 			}
@@ -99,13 +99,16 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 			hosts = make([]hostConfig, 1)
 		}
 		if len(hosts) > 0 && hosts[len(hosts)-1].host == "" {
-			if host == "docker.io" {
+			if tagetHost == "docker.io" {
+				tagetHost = "registry-1.docker.io"
+			}
+			if tagetHost == "registry-1.docker.io" {
 				hosts[len(hosts)-1].scheme = "https"
-				hosts[len(hosts)-1].host = "registry-1.docker.io"
-			} else if docker.IsLocalhost(host) {
-				hosts[len(hosts)-1].host = host
+				hosts[len(hosts)-1].host = tagetHost
+			} else if docker.IsLocalhost(tagetHost) {
+				hosts[len(hosts)-1].host = tagetHost
 				if options.DefaultScheme == "" {
-					_, port, _ := net.SplitHostPort(host)
+					_, port, _ := net.SplitHostPort(tagetHost)
 					if port == "" || port == "443" {
 						// If port is default or 443, only use https
 						hosts[len(hosts)-1].scheme = "https"
@@ -124,7 +127,7 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 					hosts[len(hosts)-1].scheme = options.DefaultScheme
 				}
 			} else {
-				hosts[len(hosts)-1].host = host
+				hosts[len(hosts)-1].host = tagetHost
 				if options.DefaultScheme != "" {
 					hosts[len(hosts)-1].scheme = options.DefaultScheme
 				} else {
@@ -152,6 +155,12 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 		client := &http.Client{
 			Transport: defaultTransport,
 		}
+		// Wrap the proxy fallback before UpdateClient so callers can install
+		// RoundTripper hooks (CRI pull-progress timeout, transfer/httpdbg) around
+		// MixTransport instead of having them replaced by it.
+		if HasProxy() {
+			client.Transport = NewMixTransport(defaultTransport)
+		}
 		if options.UpdateClient != nil {
 			if err := options.UpdateClient(client); err != nil {
 				return nil, err
@@ -170,6 +179,13 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 			// Allow setting for each host as well
 			explicitTLSFromHost := host.caCerts != nil || host.clientPairs != nil || host.skipVerify != nil
 			explicitTLS := tlsConfigured || explicitTLSFromHost
+
+			rhosts[i].Scheme = host.scheme
+			if host.host == "*" {
+				rhosts[i].Host = tagetHost
+			} else {
+				rhosts[i].Host = host.host
+			}
 
 			if explicitTLSFromHost || host.dialTimeout != nil || len(host.header) != 0 {
 				c := *client
@@ -191,6 +207,10 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 					}
 
 					c.Transport = tr
+
+					if HasProxy() {
+						c.Transport = NewMixTransport(tr)
+					}
 				}
 
 				if options.UpdateClient != nil {
@@ -228,7 +248,6 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 			}
 
 			rhosts[i].Scheme = host.scheme
-			rhosts[i].Host = host.host
 			rhosts[i].Path = host.path
 			rhosts[i].Capabilities = host.capabilities
 			rhosts[i].Header = host.header
@@ -299,8 +318,54 @@ func HostDirFromRoot(root string) func(string) (string, error) {
 				return "", err
 			}
 		}
+
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			return "", err
+		}
+		cidrs := map[string]*net.IPNet{}
+		for _, f := range entries {
+			if !f.IsDir() {
+				continue
+			}
+			dirname := f.Name()
+			if cidr := dirnameToCIDR(dirname); cidr != nil {
+				cidrs[dirname] = cidr
+			}
+		}
+		if len(cidrs) > 0 {
+			ips := hostToIPs(host)
+			for _, addr := range ips {
+				for dirname, cidr := range cidrs {
+					if cidr.Contains(addr) {
+						return filepath.Join(root, dirname), nil
+					}
+				}
+			}
+		}
+
 		return "", errdefs.ErrNotFound
 	}
+}
+
+func hostToIPs(host string) []net.IP {
+	if strings.LastIndex(host, ":") > 0 {
+		host, _, _ = net.SplitHostPort(host)
+	}
+
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		if ip := net.ParseIP(host); ip != nil {
+			ips = []net.IP{ip}
+		}
+	}
+	return ips
+}
+
+func dirnameToCIDR(dirname string) *net.IPNet {
+	cidrStr := strings.Replace(dirname, "_", "/", 1)
+	_, cidr, _ := net.ParseCIDR(cidrStr)
+	return cidr
 }
 
 // hostDirectory converts ":port" to "_port_" in directory names

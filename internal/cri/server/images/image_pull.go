@@ -523,23 +523,29 @@ func (c *CRIImageService) registryHosts(ctx context.Context, credentials func(ho
 			}
 
 			var (
-				transport = docker.DefaultHTTPTransport(nil) // no tls config
-				client    = &http.Client{Transport: transport}
-				config    = c.config.Registry.Configs[u.Host]
+				transport      = docker.DefaultHTTPTransport(nil) // no tls config
+				client         = &http.Client{Transport: transport}
+				registryConfig = c.config.Registry.Configs[u.Host]
 			)
 
 			if docker.IsLocalhost(host) && u.Scheme == "http" {
-				// Skipping TLS verification for localhost
+				// Skipping TLS verification for localhost.
+				// Set this before NewMixTransport clones the transport; otherwise the
+				// direct fallback keeps the pre-TLS clone and drops InsecureSkipVerify.
 				transport.TLSClientConfig = &tls.Config{
 					InsecureSkipVerify: true,
 				}
 			}
 
+			if config.HasProxy() {
+				client.Transport = config.NewMixTransport(transport)
+			}
+
 			// Make a copy of `credentials`, so that different authorizers would not reference
 			// the same credentials variable.
 			credentials := credentials
-			if credentials == nil && config.Auth != nil {
-				auth := toRuntimeAuthConfig(*config.Auth)
+			if credentials == nil && registryConfig.Auth != nil {
+				auth := toRuntimeAuthConfig(*registryConfig.Auth)
 				credentials = func(host string) (string, string, error) {
 					return ParseAuth(auth, host)
 				}
