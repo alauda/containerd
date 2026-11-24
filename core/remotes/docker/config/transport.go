@@ -34,18 +34,18 @@ func HasProxy() bool {
 }
 
 func (t *MixTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	var hasProxy bool
-	url, err := http.ProxyFromEnvironment(req)
-	if err == nil && url != nil {
-		hasProxy = true
-	}
+	// Read the proxy config on each request. net/http's ProxyFromEnvironment
+	// caches the first process-wide lookup (Go 1.27+), which would disagree
+	// with HasProxy after the environment is established.
+	hasProxy := requestUsesProxy(req)
 	var f *os.File
 	var reader io.ReadCloser
 	if hasProxy && req.Body != nil {
 		if pushReg.MatchString(req.URL.Path) {
-			f, err = os.CreateTemp("", "mixtransport*")
-			if err != nil {
-				return nil, err
+			var createErr error
+			f, createErr = os.CreateTemp("", "mixtransport*")
+			if createErr != nil {
+				return nil, createErr
 			}
 			defer func() {
 				f.Close()
@@ -79,6 +79,11 @@ func (t *MixTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // shouldFallbackDirect reports whether a proxy response should be retried
 // without the proxy. A 401 that carries WWW-Authenticate is an auth challenge
 // for the caller, not a failed proxy hop.
+func requestUsesProxy(req *http.Request) bool {
+	proxyURL, err := httpproxy.FromEnvironment().ProxyFunc()(req.URL)
+	return err == nil && proxyURL != nil
+}
+
 func shouldFallbackDirect(resp *http.Response, err error) bool {
 	if err != nil {
 		return true
