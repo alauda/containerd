@@ -326,6 +326,16 @@ func (p *Init) delete(ctx context.Context) error {
 			err = fmt.Errorf("failed rootfs umount: %w", err2)
 		}
 	}
+	if err == nil {
+		// CRI delete is bounded by handleEventTimeout (about 10s) in
+		// internal/cri/server/events.go. If that deadline expires after runc
+		// delete has succeeded and this shim returns success, the shim drops the
+		// process from its table while containerd has already returned. A CRI
+		// retry then gets NotFound and skips Delete/Shutdown, leaking the shim.
+		// Return ctx.Err() so the shim keeps the process and the retry can run
+		// the full delete again.
+		err = ctx.Err()
+	}
 	return err
 }
 
