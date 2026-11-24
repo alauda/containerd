@@ -63,7 +63,7 @@ func (t *MixTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 	resp, err := t.proxyTransport.RoundTrip(req)
-	if hasProxy && (err != nil || resp.StatusCode > 399) {
+	if hasProxy && shouldFallbackDirect(resp, err) {
 		if f != nil {
 			f.Seek(0, io.SeekStart)
 			req.Body = io.NopCloser(f)
@@ -74,4 +74,20 @@ func (t *MixTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	return resp, err
+}
+
+// shouldFallbackDirect reports whether a proxy response should be retried
+// without the proxy. A 401 that carries WWW-Authenticate is an auth challenge
+// for the caller, not a failed proxy hop.
+func shouldFallbackDirect(resp *http.Response, err error) bool {
+	if err != nil {
+		return true
+	}
+	if resp == nil {
+		return false
+	}
+	if resp.StatusCode == http.StatusUnauthorized && resp.Header.Get("WWW-Authenticate") != "" {
+		return false
+	}
+	return resp.StatusCode > 399
 }
