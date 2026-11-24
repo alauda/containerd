@@ -9,7 +9,7 @@
 
 ARG REGISTRY=registry.alauda.io
 
-FROM ${REGISTRY}/acp/builder-images/golang:1.25 AS builder
+FROM ${REGISTRY}/acp/builder-images/golang:1.26.11 AS builder
 
 ARG GOPROXY=https://gomod.alauda.io,direct
 ENV GOPROXY=${GOPROXY}
