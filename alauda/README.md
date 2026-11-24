@@ -70,7 +70,7 @@ git push origin v2.3.7-acp.1
 
 | Event | Result |
 | --- | --- |
-| Merge request to `alauda/release-*` | Build only: containerd for amd64, plus collection of runc (with checksum verification), nerdctl and crictl |
+| Merge request to `alauda/release-*` | Build only: containerd for amd64, plus collection of runc and nerdctl (with checksum verification) and crictl |
 | Push to `alauda/release-*` | Same as a merge request |
 | Push of a release tag | Build containerd for amd64 and arm64, push both images, publish the downstream manifest |
 
@@ -100,11 +100,12 @@ next release tag uses it with `<N>` starting again at 1.
 
 Tool versions are set in `alauda/build/cri-containerd.Dockerfile`:
 
-- runc is downloaded from the upstream release and verified against the
-  SHA-256 of each architecture, taken from the release asset `runc.sha256sum`.
-  To update it, change the version and both checksums.
-- nerdctl and crictl are copied from the `migration-sink/ait/nerdctl` and
-  `migration-sink/ait/crictl` images; change the image version to update them.
+- runc and nerdctl are downloaded from the upstream releases and verified
+  against the SHA-256 of each architecture, taken from the release assets
+  `runc.sha256sum` and `SHA256SUMS`. To update one, change its version and
+  both checksums.
+- crictl is copied from the `migration-sink/ait/crictl` image; change the image
+  version to update it.
 
 ## Building locally
 
