@@ -4,13 +4,13 @@ metadata:
   name: acp-containerd
   annotations:
     # Branch pushes and merge requests build only; a release tag
-    # v<upstream>-alauda.<N> also pushes images and publishes the manifest.
+    # v<upstream>-acp.<N> also pushes images and publishes the manifest.
     # The release decision is made in the prepare task, not here.
     pipelinesascode.tekton.dev/on-cel-expression: |-
       (
         event == "push" && (
           source_branch.matches("^alauda/release-[0-9]+\\.[0-9]+$") ||
-          source_branch.matches("^refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+-alauda\\.[0-9]+$")
+          source_branch.matches("^refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+-acp\\.[0-9]+$")
         )
       ) || (
         event == "pull_request" &&
@@ -115,7 +115,7 @@ spec:
         - name: version
           description: Image version, e.g. 2.3.7-1 (release) or 2.3.7-dev.abc1234.
         - name: build-version
-          description: Version embedded in the binaries, e.g. v2.3.7-alauda.1.
+          description: Version embedded in the binaries, e.g. v2.3.7-acp.1.
         - name: ref-name
           description: Branch or tag name without the refs/ prefix.
         - name: skip-push
@@ -153,7 +153,7 @@ spec:
 
             # A merge request (including /retest) always carries a number, so it
             # can never be taken for a release even if its ref looks like a tag.
-            tag_re='^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)-alauda\.([1-9][0-9]*)$'
+            tag_re='^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)-acp\.([1-9][0-9]*)$'
             if [ -z "${PULL_REQUEST_NUMBER}" ] && [[ "${GIT_REVISION}" =~ ${tag_re} ]]; then
               tag_upstream="${BASH_REMATCH[1]}"
               n="${BASH_REMATCH[2]}"
@@ -161,14 +161,14 @@ spec:
                 || die "tag ${GIT_REVISION#refs/tags/} does not match version/version.go ${upstream}"
               release=true
               version="${upstream}-${n}"
-              build_version="v${upstream}-alauda.${n}"
+              build_version="v${upstream}-acp.${n}"
               ref_name="${GIT_REVISION#refs/tags/}"
               skip_push=false
               platforms='["linux/amd64","linux/arm64"]'
               cri_target=cri-containerd
             else
               [[ "${GIT_REVISION}" != refs/tags/* ]] \
-                || die "${GIT_REVISION} is not a valid release tag (v<upstream>-alauda.<N>, N >= 1)"
+                || die "${GIT_REVISION} is not a valid release tag (v<upstream>-acp.<N>, N >= 1)"
               release=false
               version="${upstream}-dev.${SHORT_COMMIT}"
               build_version="v${version}"

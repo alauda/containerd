@@ -11,8 +11,8 @@ The primary repository is `code.alauda.io/acp/containerd`.
 
 | Branch | Upstream series | Release tags | Manifest channel |
 | --- | --- | --- | --- |
-| `alauda/release-2.3` (default) | containerd 2.3 | `v2.3.<patch>-alauda.<N>` | `main` |
-| `alauda/release-2.2` | containerd 2.2 | `v2.2.<patch>-alauda.<N>` | `release-2.2` |
+| `alauda/release-2.3` (default) | containerd 2.3 | `v2.3.<patch>-acp.<N>` | `main` |
+| `alauda/release-2.2` | containerd 2.2 | `v2.2.<patch>-acp.<N>` | `release-2.2` |
 
 - Each `alauda/release-*` branch is long-lived and carries its own `.tekton/`
   pipeline and `alauda/` packaging files.
@@ -26,7 +26,7 @@ The primary repository is `code.alauda.io/acp/containerd`.
 A release is a Git tag on the head of an `alauda/release-*` branch:
 
 ```
-v<upstream version>-alauda.<N>
+v<upstream version>-acp.<N>
 ```
 
 `<N>` starts at 1 for each upstream version and increases with every release of
@@ -34,7 +34,7 @@ that version. A tag that has been pushed is never moved or reused.
 
 Pushing the tag builds and publishes:
 
-| Artifact | Example for `v2.3.7-alauda.1` |
+| Artifact | Example for `v2.3.7-acp.1` |
 | --- | --- |
 | `acp/containerd:v<version>` | `acp/containerd:v2.3.7-1` |
 | `acp/cri-containerd:<version>` | `acp/cri-containerd:2.3.7-1` |
@@ -60,8 +60,8 @@ To release:
 
 ```sh
 git fetch origin
-git tag -a v2.3.7-alauda.1 -m "containerd v2.3.7-alauda.1" origin/alauda/release-2.3
-git push origin v2.3.7-alauda.1
+git tag -a v2.3.7-acp.1 -m "containerd v2.3.7-acp.1" origin/alauda/release-2.3
+git push origin v2.3.7-acp.1
 ```
 
 ## Continuous integration
