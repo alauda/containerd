@@ -43,14 +43,14 @@ func (t *MixTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	var reader io.ReadCloser
 	if hasProxy && req.Body != nil {
 		if pushReg.MatchString(req.URL.Path) {
-			f, err = os.CreateTemp("/tmp", "mixtransport*")
+			f, err = os.CreateTemp("", "mixtransport*")
+			if err != nil {
+				return nil, err
+			}
 			defer func() {
 				f.Close()
 				os.Remove(f.Name())
 			}()
-			if err != nil {
-				return nil, err
-			}
 			io.Copy(f, req.Body)
 			req.Body.Close()
 			f.Seek(0, io.SeekStart)
