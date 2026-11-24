@@ -22,6 +22,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/containerd/log/logtest"
@@ -185,4 +187,38 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func TestMixTransportCreateTempError(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+	t.Setenv("NO_PROXY", "")
+
+	unwritable := filepath.Join(t.TempDir(), "nowrite")
+	if err := os.Mkdir(unwritable, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", unwritable)
+
+	mt := &MixTransport{
+		proxyTransport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			t.Fatal("proxy transport called after temp file failure")
+			return nil, nil
+		}),
+		noProxyTransport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			t.Fatal("direct transport called after temp file failure")
+			return nil, nil
+		}),
+	}
+	req, err := http.NewRequest(http.MethodPost, "https://registry.example/v2/foo/blobs/uploads/abc", io.NopCloser(bytes.NewBufferString("blob")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := mt.RoundTrip(req)
+	if err == nil {
+		t.Fatal("expected CreateTemp error, got nil")
+	}
+	if resp != nil {
+		t.Fatalf("resp = %#v, want nil", resp)
+	}
 }
