@@ -39,10 +39,19 @@ func (m *markerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return m.base.RoundTrip(req)
 }
 
-func TestUpdateClientWrapsMixTransportWhenProxySet(t *testing.T) {
-	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
-	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+func setTestProxy(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"} {
+		t.Setenv(key, "http://127.0.0.1:9")
+	}
+	// Lowercase wins in httpproxy.FromEnvironment. Clear both so a parent
+	// no_proxy does not exempt the registry host used by these tests.
+	t.Setenv("no_proxy", "")
 	t.Setenv("NO_PROXY", "")
+}
+
+func TestUpdateClientWrapsMixTransportWhenProxySet(t *testing.T) {
+	setTestProxy(t)
 
 	var marker *markerRoundTripper
 	ctx := logtest.WithT(context.Background(), t)
@@ -79,9 +88,7 @@ func TestUpdateClientWrapsMixTransportWhenProxySet(t *testing.T) {
 }
 
 func TestMixTransportAuthChallengeNoDirectFallback(t *testing.T) {
-	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
-	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:9")
-	t.Setenv("NO_PROXY", "")
+	setTestProxy(t)
 
 	tests := []struct {
 		name       string
@@ -190,9 +197,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestMixTransportCreateTempError(t *testing.T) {
-	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
-	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:9")
-	t.Setenv("NO_PROXY", "")
+	setTestProxy(t)
 
 	unwritable := filepath.Join(t.TempDir(), "nowrite")
 	if err := os.Mkdir(unwritable, 0o555); err != nil {
