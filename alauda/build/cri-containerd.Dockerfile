@@ -9,31 +9,31 @@
 # "./<file>" layout are part of the delivery contract.
 #
 # Targets:
-#   tools           collect runc (downloaded and verified), nerdctl and crictl only
+#   tools           collect runc and nerdctl (downloaded and verified) and crictl only
 #   cri-containerd  full package (default, last stage)
 
 ARG REGISTRY=registry.alauda.io
 ARG CONTAINERD_VERSION
-ARG NERDCTL_VERSION=2.1.2
 ARG CRICTL_VERSION=1.33.0
 
 FROM --platform=linux/amd64 ${REGISTRY}/acp/containerd:v${CONTAINERD_VERSION} AS containerd-amd64
 FROM --platform=linux/arm64 ${REGISTRY}/acp/containerd:v${CONTAINERD_VERSION} AS containerd-arm64
 
-FROM --platform=linux/amd64 ${REGISTRY}/migration-sink/ait/nerdctl:v${NERDCTL_VERSION} AS nerdctl-amd64
-FROM --platform=linux/arm64 ${REGISTRY}/migration-sink/ait/nerdctl:v${NERDCTL_VERSION} AS nerdctl-arm64
 FROM --platform=linux/amd64 ${REGISTRY}/migration-sink/ait/crictl:v${CRICTL_VERSION} AS crictl-amd64
 FROM --platform=linux/arm64 ${REGISTRY}/migration-sink/ait/crictl:v${CRICTL_VERSION} AS crictl-arm64
 
 FROM ${REGISTRY}/base-images/alpine:3 AS tools
 
-# runc checksums come from the upstream release asset runc.sha256sum.
+# Checksums come from the upstream release assets:
+#   runc     runc.sha256sum
+#   nerdctl  SHA256SUMS
 ARG RUNC_VERSION=1.2.8
 ARG RUNC_SHA256_AMD64=09d2b25f31d3a819c97854c223ff9b36be7fdb0ce57fec709af499e1e19e8e89
 ARG RUNC_SHA256_ARM64=7c463d49d83f2da9f5ba6db395600c8da6c5445fd4597c2de8e8b0f82eb1bebb
+ARG NERDCTL_VERSION=2.4.2
+ARG NERDCTL_SHA256_AMD64=41a66995888043c0ba05f8061574eaba1b9e06b9b21c2a238215179df2728d3f
+ARG NERDCTL_SHA256_ARM64=6bb9cfe435be3745c079cde6c1fd14d6515a84de2b285993d1d3e2be2c4fa36a
 
-COPY --link --from=nerdctl-amd64 / /out/amd64/
-COPY --link --from=nerdctl-arm64 / /out/arm64/
 COPY --link --from=crictl-amd64 / /out/amd64/
 COPY --link --from=crictl-arm64 / /out/arm64/
 
@@ -42,14 +42,19 @@ RUN apk add --no-cache wget
 RUN set -eu; \
     for arch in amd64 arm64; do \
       case "${arch}" in \
-        amd64) runc_sha="${RUNC_SHA256_AMD64}" ;; \
-        arm64) runc_sha="${RUNC_SHA256_ARM64}" ;; \
+        amd64) runc_sha="${RUNC_SHA256_AMD64}"; nerdctl_sha="${NERDCTL_SHA256_AMD64}" ;; \
+        arm64) runc_sha="${RUNC_SHA256_ARM64}"; nerdctl_sha="${NERDCTL_SHA256_ARM64}" ;; \
       esac; \
       wget -q -O "/tmp/runc.${arch}" \
         "https://github.com/opencontainers/runc/releases/download/v${RUNC_VERSION}/runc.${arch}"; \
       echo "${runc_sha}  /tmp/runc.${arch}" | sha256sum -c -; \
       install -m 0755 "/tmp/runc.${arch}" "/out/${arch}/runc"; \
       rm -f "/tmp/runc.${arch}"; \
+      wget -q -O "/tmp/nerdctl.${arch}.tar.gz" \
+        "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${arch}.tar.gz"; \
+      echo "${nerdctl_sha}  /tmp/nerdctl.${arch}.tar.gz" | sha256sum -c -; \
+      tar -xzf "/tmp/nerdctl.${arch}.tar.gz" -C "/out/${arch}" nerdctl containerd-rootless.sh containerd-rootless-setuptool.sh; \
+      rm -f "/tmp/nerdctl.${arch}.tar.gz"; \
     done
 
 FROM tools AS package
