@@ -17,7 +17,10 @@
 package config
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"testing"
 
@@ -71,4 +74,115 @@ func TestUpdateClientWrapsMixTransportWhenProxySet(t *testing.T) {
 	if !marker.called {
 		t.Fatal("UpdateClient RoundTripper was not called")
 	}
+}
+
+func TestMixTransportAuthChallengeNoDirectFallback(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+	t.Setenv("NO_PROXY", "")
+
+	tests := []struct {
+		name       string
+		status     int
+		header     http.Header
+		proxyErr   error
+		wantDirect bool
+		wantStatus int
+	}{
+		{
+			name:   "401 with authenticate challenge",
+			status: http.StatusUnauthorized,
+			header: func() http.Header {
+				h := make(http.Header)
+				h.Set("WWW-Authenticate", `Bearer realm="https://registry.example/token"`)
+				return h
+			}(),
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "401 without challenge",
+			status:     http.StatusUnauthorized,
+			wantDirect: true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "500",
+			status:     http.StatusInternalServerError,
+			wantDirect: true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "connection error",
+			proxyErr:   errors.New("dial tcp: connection refused"),
+			wantDirect: true,
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var proxyCalls, directCalls int
+			mt := &MixTransport{
+				proxyTransport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					proxyCalls++
+					if tt.proxyErr != nil {
+						return nil, tt.proxyErr
+					}
+					header := tt.header.Clone()
+					if header == nil {
+						header = make(http.Header)
+					}
+					return &http.Response{
+						StatusCode: tt.status,
+						Header:     header,
+						Body:       io.NopCloser(bytes.NewReader(nil)),
+						Request:    req,
+					}, nil
+				}),
+				noProxyTransport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					directCalls++
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(bytes.NewReader(nil)),
+						Request:    req,
+					}, nil
+				}),
+			}
+
+			req, err := http.NewRequest(http.MethodGet, "https://registry.example/v2/", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := mt.RoundTrip(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if proxyCalls != 1 {
+				t.Fatalf("proxy calls = %d, want 1", proxyCalls)
+			}
+			wantDirectCalls := 0
+			if tt.wantDirect {
+				wantDirectCalls = 1
+			}
+			if directCalls != wantDirectCalls {
+				t.Fatalf("direct calls = %d, want %d", directCalls, wantDirectCalls)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+			if tt.status == http.StatusUnauthorized && tt.header.Get("WWW-Authenticate") != "" {
+				if resp.Header.Get("WWW-Authenticate") == "" {
+					t.Fatal("authenticate challenge was not returned")
+				}
+			}
+		})
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
