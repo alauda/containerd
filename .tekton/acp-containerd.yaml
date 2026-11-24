@@ -1,0 +1,375 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: acp-containerd
+  annotations:
+    # Branch pushes and merge requests build only; a release tag
+    # v<upstream>-alauda.<N> also pushes images and publishes the manifest.
+    # The release decision is made in the prepare task, not here.
+    pipelinesascode.tekton.dev/on-cel-expression: |-
+      (
+        event == "push" && (
+          source_branch.matches("^alauda/release-[0-9]+\\.[0-9]+$") ||
+          source_branch.matches("^refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+-alauda\\.[0-9]+$")
+        )
+      ) || (
+        event == "pull_request" &&
+        target_branch.matches("^alauda/release-[0-9]+\\.[0-9]+$")
+      )
+    pipelinesascode.tekton.dev/max-keep-runs: '5'
+  labels:
+    app.kubernetes.io/part-of: acp
+    cohort.alauda.io/partOf: kubernetes-runtime
+spec:
+  params:
+  - name: gitRepo
+    value: '{{ repo_url }}'
+  - name: gitRevision
+    value: '{{ source_branch }}'
+  - name: pullRequestNumber
+    value: '{{ pull_request_number }}'
+  pipelineSpec:
+    params:
+    - name: gitRepo
+      type: string
+    - name: gitRevision
+      type: string
+    - name: pullRequestNumber
+      type: string
+      default: ''
+    - name: targetRegistryHost
+      type: string
+      default: '{{ registry_url }}'
+    - name: gomodProxy
+      type: string
+      default: '{{ gomod_proxy }}'
+    - name: upstreamSeries
+      type: string
+      default: '2.2'
+      description: Upstream containerd minor series of this branch. Release tags and
+        version/version.go must belong to it.
+    - name: manifestChannel
+      type: string
+      default: release-2.2
+      description: Branch folder of the cri-containerd downstream manifest.
+    workspaces:
+    - name: source
+    - name: registry-config
+    - name: basic-auth
+    - name: nexus-auth
+    tasks:
+    - name: git-clone
+      taskRef:
+        resolver: hub
+        params:
+        - name: catalog
+          value: extras
+        - name: kind
+          value: task
+        - name: name
+          value: git-clone
+        - name: version
+          value: '0.10'
+      params:
+      - name: url
+        value: $(params.gitRepo)
+      - name: revision
+        value: $(params.gitRevision)
+      - name: prNumber
+        value: $(params.pullRequestNumber)
+      workspaces:
+      - name: output
+        workspace: source
+      - name: basic-auth
+        workspace: basic-auth
+    - name: prepare
+      runAfter:
+      - git-clone
+      params:
+      - name: gitRevision
+        value: $(params.gitRevision)
+      - name: pullRequestNumber
+        value: $(params.pullRequestNumber)
+      - name: shortCommit
+        value: $(tasks.git-clone.results.short-commit)
+      - name: upstreamSeries
+        value: $(params.upstreamSeries)
+      workspaces:
+      - name: source
+        workspace: source
+      taskSpec:
+        params:
+        - name: gitRevision
+          type: string
+        - name: pullRequestNumber
+          type: string
+        - name: shortCommit
+          type: string
+        - name: upstreamSeries
+          type: string
+        workspaces:
+        - name: source
+        results:
+        - name: release
+          description: '"true" for a release tag event, "false" otherwise.'
+        - name: version
+          description: Image version, e.g. 2.3.7-1 (release) or 2.3.7-dev.abc1234.
+        - name: build-version
+          description: Version embedded in the binaries, e.g. v2.3.7-alauda.1.
+        - name: ref-name
+          description: Branch or tag name without the refs/ prefix.
+        - name: skip-push
+          description: '"false" for a release, "true" otherwise.'
+        - name: platforms
+          type: array
+          description: Both architectures for a release; amd64 only otherwise.
+        - name: cri-target
+          description: cri-containerd.Dockerfile target; "tools" skips packaging
+            when acp/containerd was not pushed.
+        steps:
+        - name: compute
+          image: $(params.targetRegistryHost)/platform-edge/tekton-catalog-incubator/alauda-buildctl:latest
+          workingDir: $(workspaces.source.path)
+          env:
+          - name: GIT_REVISION
+            value: $(params.gitRevision)
+          - name: PULL_REQUEST_NUMBER
+            value: $(params.pullRequestNumber)
+          - name: SHORT_COMMIT
+            value: $(params.shortCommit)
+          - name: UPSTREAM_SERIES
+            value: $(params.upstreamSeries)
+          script: |
+            #!/usr/bin/env bash
+            set -euo pipefail
+            die() { echo "ERROR: $*" >&2; exit 1; }
+
+            upstream="$(sed -n 's/^[[:space:]]*Version = "\([0-9][0-9.]*\)+unknown"$/\1/p' version/version.go)"
+            [[ "${upstream}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+              || die "cannot read upstream version from version/version.go (got '${upstream}')"
+            [[ "${upstream}" == "${UPSTREAM_SERIES}".* ]] \
+              || die "version/version.go is ${upstream}, outside series ${UPSTREAM_SERIES}; update .tekton for this branch"
+            [ -n "${SHORT_COMMIT}" ] || die "empty short commit"
+
+            # A merge request (including /retest) always carries a number, so it
+            # can never be taken for a release even if its ref looks like a tag.
+            tag_re='^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)-alauda\.([1-9][0-9]*)$'
+            if [ -z "${PULL_REQUEST_NUMBER}" ] && [[ "${GIT_REVISION}" =~ ${tag_re} ]]; then
+              tag_upstream="${BASH_REMATCH[1]}"
+              n="${BASH_REMATCH[2]}"
+              [ "${tag_upstream}" = "${upstream}" ] \
+                || die "tag ${GIT_REVISION#refs/tags/} does not match version/version.go ${upstream}"
+              release=true
+              version="${upstream}-${n}"
+              build_version="v${upstream}-alauda.${n}"
+              ref_name="${GIT_REVISION#refs/tags/}"
+              skip_push=false
+              platforms='["linux/amd64","linux/arm64"]'
+              cri_target=cri-containerd
+            else
+              [[ "${GIT_REVISION}" != refs/tags/* ]] \
+                || die "${GIT_REVISION} is not a valid release tag (v<upstream>-alauda.<N>, N >= 1)"
+              release=false
+              version="${upstream}-dev.${SHORT_COMMIT}"
+              build_version="v${version}"
+              ref_name="${GIT_REVISION#refs/heads/}"
+              skip_push=true
+              platforms='["linux/amd64"]'
+              cri_target=tools
+            fi
+
+            printf '%s' "${release}" > "$(results.release.path)"
+            printf '%s' "${version}" > "$(results.version.path)"
+            printf '%s' "${build_version}" > "$(results.build-version.path)"
+            printf '%s' "${ref_name}" > "$(results.ref-name.path)"
+            printf '%s' "${skip_push}" > "$(results.skip-push.path)"
+            printf '%s' "${platforms}" > "$(results.platforms.path)"
+            printf '%s' "${cri_target}" > "$(results.cri-target.path)"
+            echo "release=${release} version=${version} build-version=${build_version} ref=${ref_name} platforms=${platforms} cri-target=${cri_target}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+    # reuseArtifact keeps its default (true): on a re-run of a release tag an
+    # already published image is reused instead of rebuilt, so every published
+    # tag is written once. Non-release runs never push, so nothing is reused.
+    - name: build-containerd
+      runAfter:
+      - prepare
+      taskRef:
+        resolver: hub
+        params:
+        - name: catalog
+          value: extras
+        - name: kind
+          value: task
+        - name: name
+          value: buildctl
+        - name: version
+          value: '0.1'
+      params:
+      - name: imageURL
+        value: $(params.targetRegistryHost)/acp/containerd
+      - name: imageTags
+        value:
+        - v$(tasks.prepare.results.version)
+      - name: context
+        value: .
+      - name: containerfile
+        value: alauda/build/containerd.Dockerfile
+      - name: platform
+        value:
+        - $(tasks.prepare.results.platforms[*])
+      - name: skipPush
+        value: $(tasks.prepare.results.skip-push)
+      - name: extraArgs
+        value:
+        - --opt
+        - build-arg:REGISTRY=$(params.targetRegistryHost)
+        - --opt
+        - build-arg:GOPROXY=$(params.gomodProxy)
+        - --opt
+        - build-arg:VERSION=$(tasks.prepare.results.build-version)
+        - --opt
+        - build-arg:REVISION=$(tasks.git-clone.results.commit)
+      - name: tlsVerify
+        value: 'false'
+      - name: labels
+        value:
+        - ns=$(context.taskRun.namespace)
+        - org.opencontainers.image.revision=$(tasks.git-clone.results.commit)
+        - org.opencontainers.image.ref.name=$(tasks.prepare.results.ref-name)
+        - org.opencontainers.image.version=$(tasks.prepare.results.build-version)
+      workspaces:
+      - name: source
+        workspace: source
+      - name: registry-config
+        workspace: registry-config
+    - name: build-cri-containerd
+      runAfter:
+      - build-containerd
+      taskRef:
+        resolver: hub
+        params:
+        - name: catalog
+          value: extras
+        - name: kind
+          value: task
+        - name: name
+          value: buildctl
+        - name: version
+          value: '0.1'
+      params:
+      - name: imageURL
+        value: $(params.targetRegistryHost)/acp/cri-containerd
+      - name: imageTags
+        value:
+        - $(tasks.prepare.results.version)
+      # The packaging build reads nothing from the repository; a narrow context
+      # keeps the source tree out of the BuildKit upload.
+      - name: context
+        value: alauda/build
+      - name: containerfile
+        value: cri-containerd.Dockerfile
+      - name: platform
+        value:
+        - $(tasks.prepare.results.platforms[*])
+      - name: skipPush
+        value: $(tasks.prepare.results.skip-push)
+      - name: extraArgs
+        value:
+        - --opt
+        - build-arg:REGISTRY=$(params.targetRegistryHost)
+        - --opt
+        - build-arg:CONTAINERD_VERSION=$(tasks.prepare.results.version)
+        - --opt
+        - target=$(tasks.prepare.results.cri-target)
+      - name: tlsVerify
+        value: 'false'
+      - name: labels
+        value:
+        - ns=$(context.taskRun.namespace)
+        - org.opencontainers.image.revision=$(tasks.git-clone.results.commit)
+        - org.opencontainers.image.ref.name=$(tasks.prepare.results.ref-name)
+        - org.opencontainers.image.version=$(tasks.prepare.results.version)
+      workspaces:
+      - name: source
+        workspace: source
+      - name: registry-config
+        workspace: registry-config
+    finally:
+    # Consumers look up the manifest by the last segment of acp/cri-containerd,
+    # and the channel is explicit because a tag event has no usable branch name.
+    - name: publish-manifest
+      when:
+      - input: $(tasks.build-cri-containerd.status)
+        operator: in
+        values:
+        - Succeeded
+      - input: $(tasks.prepare.results.release)
+        operator: in
+        values:
+        - 'true'
+      taskRef:
+        resolver: cluster
+        params:
+        - name: kind
+          value: task
+        - name: name
+          value: publish-downstream-manifest
+        - name: namespace
+          value: acp-build
+      params:
+      - name: components
+        value: cri-containerd,acp/cri-containerd,$(tasks.prepare.results.version),,$(params.manifestChannel)
+      - name: branch
+        value: $(params.manifestChannel)
+      - name: sourceRepo
+        value: code.alauda.io/acp/containerd
+      - name: commit
+        value: $(tasks.git-clone.results.commit)
+      workspaces:
+      - name: scratch
+        workspace: source
+      - name: nexus-auth
+        workspace: nexus-auth
+  taskRunTemplate:
+    serviceAccountName: default
+    podTemplate:
+      securityContext:
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+  workspaces:
+  - name: source
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+        storageClassName: sc-topolvm
+  - name: registry-config
+    secret:
+      secretName: '{{ registry_secret }}'
+  - name: basic-auth
+    csi:
+      driver: connectors-csi
+      readOnly: true
+      volumeAttributes:
+        connector.name: code-alauda-io
+        connector.namespace: acp
+        configuration.names: gitconfig
+        token.expiration: 30m
+  - name: nexus-auth
+    csi:
+      driver: connectors-csi
+      readOnly: true
+      volumeAttributes:
+        connector.name: artifacts-alauda-io
+        connector.namespace: acp
+        token.expiration: 30m
