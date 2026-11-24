@@ -34,23 +34,23 @@ func HasProxy() bool {
 }
 
 func (t *MixTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	var hasProxy bool
-	url, err := http.ProxyFromEnvironment(req)
-	if err == nil && url != nil {
-		hasProxy = true
-	}
+	// Read the proxy config on each request. net/http's ProxyFromEnvironment
+	// caches the first process-wide lookup (Go 1.27+), which would disagree
+	// with HasProxy after the environment is established.
+	hasProxy := requestUsesProxy(req)
 	var f *os.File
 	var reader io.ReadCloser
 	if hasProxy && req.Body != nil {
 		if pushReg.MatchString(req.URL.Path) {
-			f, err = os.CreateTemp("/tmp", "mixtransport*")
+			var createErr error
+			f, createErr = os.CreateTemp("", "mixtransport*")
+			if createErr != nil {
+				return nil, createErr
+			}
 			defer func() {
 				f.Close()
 				os.Remove(f.Name())
 			}()
-			if err != nil {
-				return nil, err
-			}
 			io.Copy(f, req.Body)
 			req.Body.Close()
 			f.Seek(0, io.SeekStart)
@@ -63,7 +63,7 @@ func (t *MixTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 	resp, err := t.proxyTransport.RoundTrip(req)
-	if hasProxy && (err != nil || resp.StatusCode > 399) {
+	if hasProxy && shouldFallbackDirect(resp, err) {
 		if f != nil {
 			f.Seek(0, io.SeekStart)
 			req.Body = io.NopCloser(f)
@@ -74,4 +74,25 @@ func (t *MixTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	return resp, err
+}
+
+// shouldFallbackDirect reports whether a proxy response should be retried
+// without the proxy. A 401 that carries WWW-Authenticate is an auth challenge
+// for the caller, not a failed proxy hop.
+func requestUsesProxy(req *http.Request) bool {
+	proxyURL, err := httpproxy.FromEnvironment().ProxyFunc()(req.URL)
+	return err == nil && proxyURL != nil
+}
+
+func shouldFallbackDirect(resp *http.Response, err error) bool {
+	if err != nil {
+		return true
+	}
+	if resp == nil {
+		return false
+	}
+	if resp.StatusCode == http.StatusUnauthorized && resp.Header.Get("WWW-Authenticate") != "" {
+		return false
+	}
+	return resp.StatusCode > 399
 }

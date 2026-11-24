@@ -154,14 +154,16 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 		client := &http.Client{
 			Transport: defaultTransport,
 		}
+		// Wrap the proxy fallback before UpdateClient so callers can install
+		// RoundTripper hooks (CRI pull-progress timeout, transfer/httpdbg) around
+		// MixTransport instead of having them replaced by it.
+		if HasProxy() {
+			client.Transport = NewMixTransport(defaultTransport)
+		}
 		if options.UpdateClient != nil {
 			if err := options.UpdateClient(client); err != nil {
 				return nil, err
 			}
-		}
-
-		if HasProxy() {
-			client.Transport = NewMixTransport(defaultTransport)
 		}
 
 		authOpts := []docker.AuthorizerOpt{docker.WithAuthClient(client)}

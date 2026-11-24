@@ -521,15 +521,17 @@ func (c *CRIImageService) registryHosts(ctx context.Context, credentials func(ho
 				registryConfig = c.config.Registry.Configs[u.Host]
 			)
 
-			if config.HasProxy() {
-				client.Transport = config.NewMixTransport(transport)
-			}
-
 			if docker.IsLocalhost(host) && u.Scheme == "http" {
-				// Skipping TLS verification for localhost
+				// Skipping TLS verification for localhost.
+				// Set this before NewMixTransport clones the transport; otherwise the
+				// direct fallback keeps the pre-TLS clone and drops InsecureSkipVerify.
 				transport.TLSClientConfig = &tls.Config{
 					InsecureSkipVerify: true,
 				}
+			}
+
+			if config.HasProxy() {
+				client.Transport = config.NewMixTransport(transport)
 			}
 
 			// Make a copy of `credentials`, so that different authorizers would not reference
