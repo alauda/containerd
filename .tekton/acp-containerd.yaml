@@ -115,7 +115,7 @@ spec:
         - name: version
           description: Image version, e.g. 2.3.7-1 (release) or 2.3.7-dev.abc1234.
         - name: build-version
-          description: Version embedded in the binaries, e.g. v2.3.7-acp.1.
+          description: Version embedded in the binaries, e.g. v2.3.7-1 (same as the image tag).
         - name: ref-name
           description: Branch or tag name without the refs/ prefix.
         - name: skip-push
@@ -161,7 +161,7 @@ spec:
                 || die "tag ${GIT_REVISION#refs/tags/} does not match version/version.go ${upstream}"
               release=true
               version="${upstream}-${n}"
-              build_version="v${upstream}-acp.${n}"
+              build_version="v${version}"
               ref_name="${GIT_REVISION#refs/tags/}"
               skip_push=false
               platforms='["linux/amd64","linux/arm64"]'
