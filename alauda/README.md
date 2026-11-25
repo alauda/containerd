@@ -38,7 +38,13 @@ Pushing the tag builds and publishes:
 | --- | --- |
 | `acp/containerd:v<version>` | `acp/containerd:v2.3.7-1` |
 | `acp/cri-containerd:<version>` | `acp/cri-containerd:2.3.7-1` |
+| Version embedded in the binaries | `v2.3.7-1` (`containerd --version`; nodes report `containerd://2.3.7-1`) |
 | Downstream manifest | component `cri-containerd`, channel per branch (table above) |
+
+The embedded version is `v<version>`, the same string as the image tag, not the
+Git tag. Kubernetes nodes report it as the container runtime version, and ACP
+compares that value with the cri-containerd version in its version lists and
+CRI upgrade matrix, so the two must stay identical.
 
 `acp/containerd` contains the static binaries `containerd`,
 `containerd-shim-runc-v2`, `containerd-stress` and `ctr`.

@@ -2,7 +2,7 @@
 # Build context: repository root.
 #
 #   buildctl/docker build -f alauda/build/containerd.Dockerfile \
-#     --build-arg VERSION=v2.3.7-acp.1 --build-arg REVISION=$(git rev-parse HEAD) .
+#     --build-arg VERSION=v2.3.7-1 --build-arg REVISION=$(git rev-parse HEAD) .
 #
 # Output image (FROM scratch): containerd, containerd-shim-runc-v2,
 # containerd-stress and ctr at the image root.
